@@ -1,0 +1,8 @@
+{
+  "name": "Remix: 3 Corações Performance",
+  "description": "Sistema de ranking de produtividade logística com separação por funções e exportação de relatórios visuais.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
