@@ -86,9 +86,25 @@ export default function App() {
     return [];
   });
   const [selectedRole, setSelectedRole] = useState<Role | 'Todos'>('Todos');
+  const [selectedShift, setSelectedShift] = useState<'Todos' | 'Turno A' | 'Turno B' | 'Turno C'>('Todos');
   const [activeTab, setActiveTab] = useState<'ranking' | 'config' | 'import'>('ranking');
   const [searchTerm, setSearchTerm] = useState('');
   const [configRoleFilter, setConfigRoleFilter] = useState<string>('Todos');
+  const [configShiftFilter, setConfigShiftFilter] = useState<string>('Todos');
+  const [shiftMap, setShiftMap] = useState<{ [employeeName: string]: string }>(() => {
+    try {
+      const savedShifts = localStorage.getItem('3coracoes_shift_map');
+      if (savedShifts) {
+        const parsed = JSON.parse(savedShifts);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing 3coracoes_shift_map:', e);
+    }
+    return {};
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Save to local storage
@@ -97,6 +113,12 @@ export default function App() {
       localStorage.setItem('3coracoes_role_map', JSON.stringify(roleMap));
     }
   }, [roleMap]);
+
+  useEffect(() => {
+    if (shiftMap && typeof shiftMap === 'object') {
+      localStorage.setItem('3coracoes_shift_map', JSON.stringify(shiftMap));
+    }
+  }, [shiftMap]);
 
   useEffect(() => {
     if (Array.isArray(records)) {
@@ -144,15 +166,28 @@ export default function App() {
     setRoleMap(prev => ({ ...prev, [name]: role }));
   };
 
+  const setEmployeeShift = (name: string, shift: string) => {
+    setShiftMap(prev => ({ ...prev, [name]: shift }));
+  };
+
   // Processing rankings
   const aggregated = aggregateByEmployee(records);
   const employeeNames = Object.keys(aggregated);
   const roles = Array.from(new Set(Object.values(roleMap)));
 
-  const getRankings = (filterRole: string): RankingEntry[] => {
+  const getRankings = (filterRole: string, filterShift: string): RankingEntry[] => {
     let filteredNames = employeeNames;
     if (filterRole !== 'Todos') {
-      filteredNames = employeeNames.filter(name => roleMap[name] === filterRole);
+      filteredNames = filteredNames.filter(name => roleMap[name] === filterRole);
+    }
+    if (filterShift !== 'Todos') {
+      filteredNames = filteredNames.filter(name => {
+        const shift = shiftMap[name] || '';
+        if (filterShift === 'Sem Turno') {
+          return !shift;
+        }
+        return shift === filterShift;
+      });
     }
 
     if (searchTerm) {
@@ -173,9 +208,9 @@ export default function App() {
       .map((entry, index) => ({ ...entry, rank: index + 1 }));
   };
 
-  const rankings = getRankings(selectedRole);
+  const rankings = getRankings(selectedRole, selectedShift);
 
-  const downloadRanking = async (role: string) => {
+  const downloadRanking = async (role: string, shift: string) => {
     const element = document.getElementById(`ranking-capture-area`);
     if (element) {
       try {
@@ -186,7 +221,9 @@ export default function App() {
           cacheBust: true
         });
         const link = document.createElement('a');
-        link.download = `ranking-${role.toLowerCase().replace(/\s+/g, '-')}.png`;
+        const roleStr = role.toLowerCase().replace(/\s+/g, '-');
+        const shiftStr = shift.toLowerCase().replace(/\s+/g, '-');
+        link.download = `ranking-${roleStr}-${shiftStr}.png`;
         link.href = dataUrl;
         link.click();
       } catch (err) {
@@ -302,9 +339,23 @@ export default function App() {
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <h1 className="text-2xl font-bold">Gestão de Colaboradores</h1>
-                  <p className="text-slate-500 text-sm">Atribua funções específicas para segmentar os rankings mensais.</p>
+                  <p className="text-slate-500 text-sm">Atribua funções e turnos específicos para segmentar os rankings mensais.</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="relative">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <select
+                      value={configShiftFilter}
+                      onChange={(e) => setConfigShiftFilter(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-md pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-slate-400 w-44 appearance-none"
+                    >
+                      <option value="Todos">Todos Turnos</option>
+                      <option value="Sem Turno">Sem Turno</option>
+                      <option value="Turno A">Turno A</option>
+                      <option value="Turno B">Turno B</option>
+                      <option value="Turno C">Turno C</option>
+                    </select>
+                  </div>
                   <div className="relative">
                     <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <select
@@ -340,6 +391,7 @@ export default function App() {
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
                         <th className="px-6 py-3 font-black text-slate-900">Colaborador</th>
+                        <th className="px-6 py-3 font-black text-slate-900 text-right">Turno</th>
                         <th className="px-6 py-3 font-black text-slate-900 text-right">Função Designada</th>
                       </tr>
                     </thead>
@@ -348,12 +400,28 @@ export default function App() {
                         .filter(name => {
                           const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase());
                           const role = roleMap[name] || 'Sem Função';
+                          const shift = shiftMap[name] || '';
                           const matchesRole = configRoleFilter === 'Todos' || role === configRoleFilter;
-                          return matchesSearch && matchesRole;
+                          const matchesShift = configShiftFilter === 'Todos' || 
+                            (configShiftFilter === 'Sem Turno' && !shift) || 
+                            shift === configShiftFilter;
+                          return matchesSearch && matchesRole && matchesShift;
                         })
                         .map(name => (
                           <tr key={name} className="hover:bg-slate-50 transition-colors">
                             <td className="px-6 py-4 font-black text-slate-900">{name}</td>
+                            <td className="px-6 py-4 text-right">
+                              <select
+                                value={shiftMap[name] || ''}
+                                onChange={(e) => setEmployeeShift(name, e.target.value)}
+                                className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-slate-400"
+                              >
+                                <option value="">Sem Turno</option>
+                                <option value="Turno A">Turno A</option>
+                                <option value="Turno B">Turno B</option>
+                                <option value="Turno C">Turno C</option>
+                              </select>
+                            </td>
                             <td className="px-6 py-4 text-right">
                               <select
                                 value={roleMap[name] || ''}
@@ -386,34 +454,62 @@ export default function App() {
               className="space-y-6"
             >
               {/* Header & Controls */}
-              <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+              <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
                 <div>
                   <h1 className="text-3xl font-bold tracking-tight">Ranking de Produtividade</h1>
                   <p className="text-slate-500 text-sm font-medium">Relatório mensal de desempenho operacional</p>
                 </div>
                 
-                <div className="flex items-center gap-3">
-                  <div className="flex bg-white border border-slate-200 p-1 rounded-md">
-                    {['Todos', ...roles].filter(Boolean).map(role => (
-                      <button
-                        key={role}
-                        onClick={() => setSelectedRole(role)}
-                        className={cn(
-                          "px-4 py-1.5 rounded text-xs font-bold transition-all",
-                          selectedRole === role 
-                            ? "bg-slate-900 text-white shadow-sm" 
-                            : "text-slate-500 hover:text-slate-900"
-                        )}
-                      >
-                        {role}
-                      </button>
-                    ))}
+                <div className="flex flex-wrap items-center gap-4">
+                  {/* Filtro por Turno */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Filtrar por Turno</span>
+                    <div className="flex bg-white border border-slate-200 p-1 rounded-md">
+                      {['Todos', 'Turno A', 'Turno B', 'Turno C'].map(shift => (
+                        <button
+                          key={shift}
+                          onClick={() => setSelectedShift(shift as any)}
+                          className={cn(
+                            "px-3 py-1.5 rounded text-xs font-bold transition-all",
+                            selectedShift === shift 
+                              ? "bg-slate-900 text-white shadow-sm" 
+                              : "text-slate-500 hover:text-slate-900"
+                          )}
+                        >
+                          {shift}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Filtro por Função */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Filtrar por Função</span>
+                    <div className="flex bg-white border border-slate-200 p-1 rounded-md">
+                      {['Todos', ...roles].filter(Boolean).map(role => (
+                        <button
+                          key={role}
+                          onClick={() => setSelectedRole(role)}
+                          className={cn(
+                            "px-3 py-1.5 rounded text-xs font-bold transition-all",
+                            selectedRole === role 
+                              ? "bg-slate-900 text-white shadow-sm" 
+                              : "text-slate-500 hover:text-slate-900"
+                          )}
+                        >
+                          {role}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   
-                  <Button variant="success" onClick={() => downloadRanking(selectedRole)}>
-                    <Download className="w-4 h-4" />
-                    Exportar Ranking
-                  </Button>
+                  <div className="flex flex-col gap-1 self-end">
+                    <span className="text-[10px] font-black uppercase text-transparent select-none tracking-wider">Exportar</span>
+                    <Button variant="success" onClick={() => downloadRanking(selectedRole, selectedShift)}>
+                      <Download className="w-4 h-4" />
+                      Exportar Ranking
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -425,7 +521,7 @@ export default function App() {
                     <div>
                       <h2 className="text-white text-xl font-bold flex items-center gap-2">
                         <Trophy className="text-amber-400 w-5 h-5" />
-                        Top Performance: {selectedRole}
+                        Top Performance: {selectedRole === 'Todos' ? 'Geral' : selectedRole} {selectedShift !== 'Todos' ? ` • ${selectedShift}` : ''}
                       </h2>
                       <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mt-1">3 Corações Logistics • Junho 2026</p>
                     </div>
